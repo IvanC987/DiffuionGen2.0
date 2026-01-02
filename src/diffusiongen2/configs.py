@@ -27,7 +27,7 @@ class DiffusionConfig:
     beta1: float = 0.00085
     beta2: float = 0.0120
     s: float = 0.008
-    min_snr_gamma: float = 5.0
+    min_snr_gamma: None | float = None  # Default None, otherwise a float, typically 5 or 10
 
 
 @dataclass
@@ -47,7 +47,8 @@ class TrainingConfig:
     compile_model: bool = MISSING
 
     epochs: int = MISSING
-    ema_beta: float = 0.95  # 90% of the weights would be at the 45 most recent steps for beta=0.95. (0.96, 56), (0.97, 76)
+    loss_ema_beta: float = 0.95  # 90% of the weights would be at the 45 most recent steps for beta=0.95. (0.96, 56), (0.97, 76)
+    weight_ema_beta: float = 0.995
     cfg_dropout: float = 0.1
     seed: int = 89
 

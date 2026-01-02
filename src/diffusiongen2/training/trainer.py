@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import copy
 from pathlib import Path
 from logging import Logger
 import torch
@@ -68,7 +69,12 @@ def generate_and_log_samples(model: DiffusionModel,
     return eval_prompt_embd.shape[0] * len_cfg_scales, int(time.time() - start), wandb_images
 
 
-# TODO: Later on, add EMA for weight updates
+@torch.no_grad()
+def update_ema(model: DiffusionModel, ema_model: DiffusionModel, beta: float):
+    for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+        ema_param.data.mul_(beta).add_(param.data, alpha=1 - beta)
+
+
 def train(model: DiffusionModel,
           optimizer: torch.optim.Optimizer,
           scheduler: torch.optim.lr_scheduler.LRScheduler,
@@ -98,6 +104,11 @@ def train(model: DiffusionModel,
         model = torch.compile(model)
     else:
         raw_model = model
+
+    # Create deepcopy of model for ema
+    ema_model = copy.deepcopy(raw_model)
+    ema_model.requires_grad_(False)
+    ema_model.eval()
 
     # Eval Prompts
     eval_prompts_path = PROJECT_ROOT / eval_config.prompts_path
@@ -134,28 +145,32 @@ def train(model: DiffusionModel,
                 with torch.autocast(device_type=device, dtype=torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float32):
                     pred, target = model(latents, text_embd, timesteps)
 
-                    # Calculate the loss. Don't want to reduce as we need to apply min-snr
+                    # Calculate the loss. Don't want to reduce as we need to apply min-snr if used
                     raw_loss = torch.nn.functional.mse_loss(pred, target, reduction="none")
-                    snr = model.alpha_bar[timesteps] / (1 - model.alpha_bar[timesteps])
-                    min_snr = torch.clamp(snr, max=diffusion_config.min_snr_gamma).reshape(-1, 1, 1, 1)
+                    if diffusion_config.min_snr_gamma is not None:
+                        snr = model.alpha_bar[timesteps] / (1 - model.alpha_bar[timesteps])
+                        min_snr = torch.clamp(snr, max=diffusion_config.min_snr_gamma).reshape(-1, 1, 1, 1)
+                        raw_loss = min_snr * raw_loss
 
-                    loss = (min_snr * raw_loss).mean()
+                    loss = raw_loss.mean()
+
                 loss /= mini_steps
                 loss_accum += loss.item()
                 loss.backward()
 
             train_losses.append([global_train_step, loss_accum])
-            ema_train_loss = (1 - training_config.ema_beta) * loss_accum + training_config.ema_beta * ema_train_loss
+            ema_train_loss = (1 - training_config.loss_ema_beta) * loss_accum + training_config.loss_ema_beta * ema_train_loss
 
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), optim_config.grad_clip)  # Prevents unstable learning
             optimizer.step()
+            update_ema(model=raw_model, ema_model=ema_model, beta=training_config.weight_ema_beta)
 
             if local_train_step % eval_config.log_every_n_steps == 0:
                 elapsed = time.time() - start
                 start = time.time()
 
                 # Bias correction for initial steps
-                train_loss_ema_bc = ema_train_loss / (1 - training_config.ema_beta ** global_train_step)
+                train_loss_ema_bc = ema_train_loss / (1 - training_config.loss_ema_beta ** global_train_step)
                 train_losses_ema.append([global_train_step, train_loss_ema_bc])
 
                 logger.info(f"Training Loss: {train_loss_ema_bc:.4f}   |   "  
@@ -215,7 +230,7 @@ def train(model: DiffusionModel,
             # A bit of a hacky solution, but don't want to set img_dim in configs. Might forget to update when testing out various resolutions. Better to get from DS Loader
             latent_dim = dataset_loader.train_latent.shape[2]
 
-            samples_output = generate_and_log_samples(model=model, vae=vae, eval_dict=eval_dict,
+            samples_output = generate_and_log_samples(model=ema_model, vae=vae, eval_dict=eval_dict,
                                                       eval_output_dir=eval_output_dir, latent_dim=latent_dim,
                                                       epoch=epoch, cfg_scales=eval_config.cfg_scales, device=device
                                                       )
@@ -242,11 +257,12 @@ def train(model: DiffusionModel,
             json.dump(metrics_json, f)
 
         if epoch % training_config.ckpt_interval == 0 or epoch == training_config.epochs - 1:
-            filename = f"epoch_{epoch:04d}_tl_{ema_train_loss:.4f}.pt"
+            filename = f"epoch_{epoch:02d}_tl_{ema_train_loss:.4f}.pt"
             ckpt_path = ckpt_dir / filename
 
             ckpt_dict = {
                 "model_state_dict": raw_model.state_dict(),
+                "ema_state_dict": ema_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(),
                 "config": config,
