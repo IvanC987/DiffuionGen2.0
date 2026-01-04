@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DiffusionGen2 - Image Generation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Top Section -->
+  <div class="top-section">
+    <div class="hamburger" id="hamburger-button">
+      <div class="line"></div>
+      <div class="line"></div>
+      <div class="line"></div>
+    </div>
+    <div class="top-title">
+      <h1>DiffusionGen2 - Image Generation</h1>
+    </div>
+    <div class="top-controls">
+      <button id="theme-toggle">Light/Dark Mode</button>
+    </div>
+  </div>
+
+  <form id="generateForm">
+    <!-- Advanced Settings Drawer -->
+    <div class="advanced-panel" id="advancedPanel">
+      <h2>Advanced Settings</h2>
+
+      <label for="seed">Random Seed (Optional):</label>
+      <input type="number" id="seed" name="seed" placeholder="Leave empty for random">
+
+      <div style="margin-top: 15px; display: flex; align-items: center;">
+        <input type="checkbox" id="use_ema" name="use_ema" checked style="margin-right: 8px; width: 16px; height: 16px;">
+        <label for="use_ema" style="margin: 0; line-height: 1; transform: translateY(-5px);">Use EMA</label>
+      </div>
+
+      <p style="margin-top: 15px; color: #666; font-size: 13px;">Other parameters available in Configuration panel on the left.</p>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container">
+
+        <!-- Left Section (Configuration) -->
+        <div class="sidebar">
+          <h2>Configuration</h2>
+
+          <!-- Config Row: Batch Size, CFG, Steps -->
+          <div class="config-row">
+            <div class="config-item">
+              <label for="batch_size">Batch Size:</label>
+              <input type="number" id="batch_size" name="batch_size" value="1" min="1" max="10" step="1">
+            </div>
+            <div class="config-item">
+              <label for="cfg">CFG Scale:</label>
+              <input type="number" id="cfg" name="cfg" value="7.5" min="0" max="20" step="0.1">
+            </div>
+            <div class="config-item">
+              <label for="steps">Steps:</label>
+              <input type="number" id="steps" name="steps" value="20" min="1" max="1000">
+            </div>
+          </div>
+
+          <!-- Prompt Section -->
+          <div class="prompt-container">
+            <label for="prompt">Prompt:</label>
+            <input
+              type="text"
+              id="prompt"
+              name="prompt"
+              placeholder="Enter your prompt here..."
+              required
+              style="width:100%;">
+          </div>
+
+          <!-- Negative Prompt -->
+          <div class="prompt-container">
+            <label for="negative_prompt">Negative Prompt (Optional):</label>
+            <input
+              type="text"
+              id="negative_prompt"
+              name="negative_prompt"
+              placeholder="What to avoid..."
+              style="width:100%;">
+          </div>
+
+          <!-- Generate Button -->
+          <button type="submit" class="generate-btn">Generate</button>
+        </div>
+
+        <!-- Right Section (Output) -->
+        <div class="output-section">
+          <div class="image-container">
+            <h2>Generated Image</h2>
+            <div id="imagePlaceholder">
+              <p>Generated Image Will Appear Here</p>
+            </div>
+            <img id="resultImage" src="" alt="Generated Image">
+
+            <!-- Navigation Arrows -->
+            <div class="image-nav-container">
+              <button id="prevButton" type="button" class="nav-arrow">←</button>
+              <span id="imageCounter" class="image-counter"></span>
+              <button id="nextButton" type="button" class="nav-arrow">→</button>
+            </div>
+
+            <progress id="progressBar" value="0" max="100"></progress>
+            <div id="progressText">0%</div>
+            <button id="downloadButton" type="button">Download Image</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>

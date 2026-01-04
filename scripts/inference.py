@@ -69,7 +69,7 @@ def generate_latent(model: DiffusionModel,
 
     latents = torch.randn((batch_size, 4, latent_dim, latent_dim), dtype=prompt.dtype, device=device)
     combined_prompts = torch.cat((prompt, negative_prompt), dim=0)  # Should be [2, 77, 512] now
-    cfg_scales = torch.tensor([cfg], dtype=torch.float32, device=device).reshape(batch_size, 1, 1, 1)
+    cfg_scales = torch.tensor([cfg] * batch_size, dtype=torch.float32, device=device).reshape(batch_size, 1, 1, 1)
 
     # Normally steps=T, but experimentally it would be interesting to see result when skipping steps
     # It's a feature, not a bug lol

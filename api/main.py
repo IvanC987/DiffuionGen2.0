@@ -8,6 +8,9 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
+from fastapi.templating import Jinja2Templates
+from fastapi.requests import Request
+from fastapi.staticfiles import StaticFiles
 
 from diffusiongen2.utils.paths import PROJECT_ROOT
 from diffusiongen2.models.diffusion import DiffusionModel
@@ -15,8 +18,17 @@ from scripts.inference import load_inference_config, load_model_from_checkpoint,
 
 
 app = FastAPI(title="DiffusionGen2 Inference API")
+app.mount(
+    "/static",
+    StaticFiles(directory=PROJECT_ROOT / "frontend/static_v2"),
+    name="static",
+)
 
-model: DiffusionModel | None = None
+templates = Jinja2Templates(directory="frontend/templates_v2")
+
+
+raw_model: DiffusionModel | None = None
+ema_model: DiffusionModel | None = None
 vae: AutoencoderKL | None = None
 clip_tokenizer: CLIPTokenizer | None = None
 clip_text_model: CLIPTextModel | None = None
@@ -34,16 +46,25 @@ class GenerateRequest(BaseModel):
     steps: int
     cfg: float
     seed: int | None
+    use_ema: bool
 
 
 class GenerateResponse(BaseModel):
     images: list[str]  # base64-encoded PNGs
-    seed: int
+    seed: int | None
+
+
+@app.get("/")
+def index(request: Request):
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request}
+    )
 
 
 @app.on_event("startup")
 def startup():
-    global model, vae, clip_tokenizer, clip_text_model, inf_cfg, device, dtype
+    global raw_model, ema_model, vae, clip_tokenizer, clip_text_model, inf_cfg, device, dtype
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float32
@@ -51,7 +72,13 @@ def startup():
     inf_cfg_path = PROJECT_ROOT / "configs/inference/default.yaml"
     inf_cfg = load_inference_config(inf_cfg_path)
 
-    model = load_model_from_checkpoint(
+    raw_model = load_model_from_checkpoint(
+        checkpoint_paths=inf_cfg["checkpoint_path"],
+        use_ema=False,
+        device=device,
+    )
+
+    ema_model = load_model_from_checkpoint(
         checkpoint_paths=inf_cfg["checkpoint_path"],
         use_ema=True,
         device=device,
@@ -85,7 +112,7 @@ def tokenize_prompt(prompt: str) -> torch.Tensor:
 
 @app.post("/generate", response_model=GenerateResponse)
 def generate(req: GenerateRequest):
-    if model is None or vae is None:
+    if raw_model is None or ema_model is None or vae is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     prompt_embd = tokenize_prompt(req.prompt)
@@ -93,12 +120,12 @@ def generate(req: GenerateRequest):
 
     with generation_lock:
         images = generate_latent(
-            model=model,
+            model=ema_model if req.use_ema else raw_model,
             vae=vae,
             prompt=prompt_embd,
             negative_prompt=negative_embd,
             cfg=req.cfg,
-            T=model.T,
+            T=raw_model.T,
             batch_size=req.batch_size,
             latent_dim=inf_cfg["latent_dim"],
             use_ddpm=True,
@@ -117,7 +144,7 @@ def generate(req: GenerateRequest):
 
 @app.get("/health")
 def health():
-    model_loaded = model is not None
+    model_loaded = raw_model is not None and ema_model is not None
     vae_loaded = vae is not None
     clip_loaded = clip_text_model is not None and clip_tokenizer is not None
     return {
