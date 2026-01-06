@@ -1,10 +1,12 @@
 import base64
 import io
 import threading
+import numpy as np
 
 import torch
 from diffusers import AutoencoderKL
 from transformers import CLIPTokenizer, CLIPTextModel
+from realesrgan import RealESRGANer
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
@@ -14,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from diffusiongen2.utils.paths import PROJECT_ROOT
 from diffusiongen2.models.diffusion import DiffusionModel
-from scripts.inference import load_inference_config, load_model_from_checkpoint, load_vae, generate_latent
+from scripts.inference import load_inference_config, load_model_from_checkpoint, load_vae, load_real_esrgan, generate_latent
 
 
 app = FastAPI(title="DiffusionGen2 Inference API")
@@ -32,6 +34,7 @@ ema_model: DiffusionModel | None = None
 vae: AutoencoderKL | None = None
 clip_tokenizer: CLIPTokenizer | None = None
 clip_text_model: CLIPTextModel | None = None
+upsampler: RealESRGANer | None = None
 inf_cfg: dict | None = None
 device: str | None = None
 dtype: torch.dtype | None = None
@@ -103,6 +106,9 @@ def startup():
     clip_text_model.requires_grad_(False)
     clip_text_model.eval()
 
+    # Don't want to load Real ESRGAN here by default actually, there's some additional complexities going on there to use
+    # Only load if users explicitly checked the box to use
+
 
 def pil_to_base64(img: Image) -> str:
     buffer = io.BytesIO()
@@ -130,9 +136,24 @@ def preview_callback(decoded_image: Image, step: int):
     preview_step = step
 
 
+def upscale_image(images: list[Image]) -> list[Image]:
+    upscaled_images = []
+
+    for img in images:
+        img_np = np.array(img)
+        with torch.no_grad():
+            output, _ = upsampler.enhance(img_np, outscale=2)
+
+        # Rescaling it back down to keep original shape for front-end GUI. Might come back to accommodate dif res later on
+        upscaled_img = Image.fromarray(output).resize(images[0].size, resample=Image.Resampling.BICUBIC)
+        upscaled_images.append(upscaled_img)
+
+    return upscaled_images
+
+
 @app.post("/generate", response_model=GenerateResponse)
 def generate(req: GenerateRequest):
-    global generation_progress, latest_preview_image, preview_step, total_steps
+    global generation_progress, latest_preview_image, preview_step, total_steps, upsampler
 
     total_steps = req.steps
     latest_preview_image = None
@@ -146,7 +167,6 @@ def generate(req: GenerateRequest):
     negative_embd = tokenize_prompt(req.negative_prompt)
 
     with generation_lock:
-
         images = generate_latent(
             model=ema_model if req.use_ema else raw_model,
             vae=vae,
@@ -165,8 +185,18 @@ def generate(req: GenerateRequest):
             progress_callback=set_progress
         )
 
-    generation_progress = 1.0
+    if req.use_real_esrgan:  # Go into upsampling
+        print("Now upsampling...")
+        if device == "cuda":  # Free cache
+            torch.cuda.empty_cache()
+
+        if upsampler is None:  # Load it in if first time
+            upsampler = load_real_esrgan(model_path=inf_cfg["real_esrgan_path"], device=device)
+
+        images = upscale_image(images)  # Upscale image
+
     encoded_images = [pil_to_base64(img) for img in images]
+    generation_progress = 1.0
 
     return GenerateResponse(
         images=encoded_images,

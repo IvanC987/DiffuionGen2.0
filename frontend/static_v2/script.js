@@ -53,7 +53,7 @@ async function pollProgress(progressBar, progressText) {
     progressText.textContent = pct + "%";
 
     if (pct < 100) {
-      setTimeout(() => pollProgress(progressBar, progressText), 400);
+      setTimeout(() => pollProgress(progressBar, progressText), 500);
     }
   } catch (e) {
     console.error("Progress polling failed", e);

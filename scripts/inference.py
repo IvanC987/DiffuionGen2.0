@@ -3,6 +3,8 @@ import torch
 from tqdm import tqdm
 from PIL import Image
 from diffusers import AutoencoderKL
+from realesrgan import RealESRGANer
+from basicsr.archs.rrdbnet_arch import RRDBNet
 
 from diffusiongen2.models.diffusion import DiffusionModel
 from diffusiongen2.configs import ProjectConfig
@@ -18,6 +20,18 @@ def load_vae(model_id: str, device: str) -> AutoencoderKL:
     vae.requires_grad_(False)
     vae.eval()
     return vae
+
+
+def load_real_esrgan(model_path: str, device: str) -> RealESRGANer:
+    RRDBNet_model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+    upsampler = RealESRGANer(
+        scale=2,
+        model_path=model_path,
+        model=RRDBNet_model,
+        half=True if device == "cuda" else False  # Use FP16 on CUDA
+    )
+
+    return upsampler
 
 
 def load_model_from_checkpoint(checkpoint_paths: str, use_ema: bool, device: str) -> DiffusionModel:
