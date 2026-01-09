@@ -3,6 +3,10 @@ vae_model_id: "stabilityai/sd-vae-ft-ema"
 clip_model_id: "openai/clip-vit-base-patch32"
 real_esrgan_path: "assets/realesrgan/RealESRGAN_x2plus.pth"
 
+train_prompt_bank: "assets/train_clip_prompt_bank.pt"
+val_prompt_bank: "assets/val_clip_prompt_bank.pt"
+faiss_k: 5
+
 cfg_scale: 5.0
 seed: 89
 latent_dim: 32  # Latent dim from VAE seen by model during training. If model is trained on 256x256 images, set to 32, if 512x512, set to 64

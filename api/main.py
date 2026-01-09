@@ -1,8 +1,10 @@
 import base64
 import io
 import threading
+import random
 import numpy as np
 
+import faiss
 import torch
 import torchvision
 from torchvision import transforms
@@ -46,6 +48,13 @@ latest_preview_image: str | None = None
 preview_step: int | None = None
 total_steps: int | None = None
 
+train_prompt_bank: dict | None = None
+val_prompt_bank: dict | None = None
+train_vec_db: faiss.IndexFlatIP | None = None
+val_vec_db: faiss.IndexFlatIP | None = None
+merged_train_prompt_list: list[str] | None = None
+merged_val_prompt_list: list[str] | None = None
+
 generation_lock = threading.Lock()
 
 
@@ -63,12 +72,16 @@ class GenerateRequest(BaseModel):
     preview_interval: int
     b64_image: str | None
     img2img_strength: float
-    b64_inpaint_image: str | None = None
-    b64_inpaint_mask: str | None = None
+    b64_inpaint_image: str | None
+    b64_inpaint_mask: str | None
+    use_prompt_matching: bool
+    prompt_match_train: bool
+    prompt_match_val: bool
 
 
 class GenerateResponse(BaseModel):
     images: list[str]  # base64-encoded PNGs
+    prompt: str  # Prompt used to generate the image(s)
     seed: int | None
 
 
@@ -82,7 +95,8 @@ def index(request: Request):
 
 @app.on_event("startup")
 def startup():
-    global raw_model, ema_model, vae, clip_tokenizer, clip_text_model, inf_cfg, device, dtype
+    global raw_model, ema_model, vae, clip_tokenizer, clip_text_model, inf_cfg, device, dtype, \
+        train_prompt_bank, val_prompt_bank, train_vec_db, val_vec_db, merged_train_prompt_list, merged_val_prompt_list
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if (device == "cuda" and torch.cuda.is_bf16_supported()) else torch.float32
@@ -114,6 +128,37 @@ def startup():
 
     # Don't want to load Real ESRGAN here by default actually, there's some additional complexities going on there to use
     # Only load if users explicitly checked the box to use
+
+    # Prompt banks have the structure of:
+    # {
+    #     "dragon": [list[str], Tensor[N, 512]],
+    #     "fairy": [...],
+    #     ...
+    # }
+    train_prompt_bank = torch.load(inf_cfg["train_prompt_bank"], map_location="cpu")
+    val_prompt_bank = torch.load(inf_cfg["val_prompt_bank"], map_location="cpu")
+
+    # Extract and merge into a single list of prompts
+    merged_train_prompt_list = [v[0] for v in train_prompt_bank.values()]
+    merged_train_prompt_list = [p for sublist in merged_train_prompt_list for p in sublist]
+    merged_val_prompt_list = [v[0] for v in val_prompt_bank.values()]
+    merged_val_prompt_list = [p for sublist in merged_val_prompt_list for p in sublist]
+
+    train_db_tensor = [v[1] for v in train_prompt_bank.values()]
+    train_db_tensor = torch.cat(train_db_tensor, dim=0)  # shape=(N, 512), here N is the total num embedding sum along all categories
+    train_db_tensor = train_db_tensor.detach().cpu().float().numpy()
+    faiss.normalize_L2(train_db_tensor)  # Should already be normalized, just a safeguard
+
+    val_db_tensor = [v[1] for v in val_prompt_bank.values()]
+    val_db_tensor = torch.cat(val_db_tensor, dim=0)
+    val_db_tensor = val_db_tensor.detach().cpu().float().numpy()
+    faiss.normalize_L2(val_db_tensor)
+
+    train_vec_db = faiss.IndexFlatIP(512)
+    train_vec_db.add(train_db_tensor)
+
+    val_vec_db = faiss.IndexFlatIP(512)
+    val_vec_db.add(val_db_tensor)
 
 
 def pil_to_base64(img: Image) -> str:
@@ -164,7 +209,7 @@ def upscale_image(images: list[Image]) -> list[Image]:
 
 def get_init_latent(b64_image: str, batch_size: int):
     b64_pil = base64_to_pil(b64_image)
-    b64_pil = b64_pil.resize((256, 256), Image.Resampling.BICUBIC)
+    b64_pil = b64_pil.resize((inf_cfg["latent_dim"], inf_cfg["latent_dim"]), Image.Resampling.BICUBIC)
 
     # Convert to torch tensor, shape (C, H, W) and range [0, 1]
     img_tensor = transforms.ToTensor()(b64_pil)
@@ -175,6 +220,28 @@ def get_init_latent(b64_image: str, batch_size: int):
         init_latent = vae.encode(img_tensor).latent_dist.sample()
 
     return init_latent * 0.18215
+
+
+def prompt_match(prompt: str, db: faiss.IndexFlatIP, prompt_list: list[str]):
+    with torch.no_grad(), torch.autocast(dtype=dtype, device_type=device):
+        tokens = clip_tokenizer([prompt], return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
+        text_embd = clip_text_model(**tokens).pooler_output
+        text_embd = torch.nn.functional.normalize(text_embd, dim=-1)
+
+    # E.g.
+    # scores=[[0.7709671  0.76750416 0.7666029  0.76368684 0.76290154]]
+    # indices=[[28 37 98 34  9]]
+    scores, indices = db.search(text_embd, k=inf_cfg["faiss_k"])
+
+    # Since the top k scores are all quite similar, need lower temp to meaningfully differentiate.
+    # Else it would be nearly uniform sample. 0.25 is a heuristic. Feel free to play around with the value
+    temperature = 0.25
+    normalized_scores = torch.softmax(torch.tensor(scores[0], dtype=torch.float32) / temperature, dim=0)
+
+    # Grab the appropriate index
+    chosen_index = indices[0][torch.multinomial(normalized_scores, num_samples=1).item()]
+
+    return tokenize_prompt(prompt_list[chosen_index]), prompt_list[chosen_index]
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -189,7 +256,17 @@ def generate(req: GenerateRequest):
     if raw_model is None or ema_model is None or vae is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    prompt_embd = tokenize_prompt(req.prompt)
+    if req.use_prompt_matching:
+        if req.prompt_match_train == req.prompt_match_val:
+            raise HTTPException(status_code=400, detail="Exactly one of prompt_match_train or prompt_match_val must be true")
+
+        prompt_embd, return_prompt = prompt_match(prompt=req.prompt,
+                                                  db=train_vec_db if req.prompt_match_train else val_vec_db,
+                                                  prompt_list=merged_train_prompt_list if req.prompt_match_train else merged_val_prompt_list)
+    else:
+        prompt_embd = tokenize_prompt(req.prompt)
+        return_prompt = req.prompt
+
     negative_embd = tokenize_prompt(req.negative_prompt)
 
     if req.b64_image is not None:
@@ -250,6 +327,7 @@ def generate(req: GenerateRequest):
 
     return GenerateResponse(
         images=encoded_images,
+        prompt=return_prompt,
         seed=req.seed,
     )
 
@@ -290,3 +368,27 @@ def editor(request: Request):
       "editor.html",
       {"request": request}
     )
+
+
+@app.get("/random_prompt")
+def random_prompt(
+    split: str,
+    category: str = "any"
+):
+    if split not in ["train", "val"]:
+        raise HTTPException(status_code=400, detail="Invalid split")
+
+    bank = train_prompt_bank if split == "train" else val_prompt_bank
+
+    if category == "any":
+        category = random.choice(list(bank.keys()))
+
+    if category not in bank and category != "any":
+        raise HTTPException(status_code=400, detail="Invalid category")
+
+    prompts, _ = bank[category]
+    prompt = random.choice(prompts)
+
+    return {
+        "prompt": prompt,
+    }

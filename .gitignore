@@ -2,12 +2,8 @@
 __pycache__
 diffusiongen2.egg-info
 
-assets/*
-!assets/4_river_val_embd.pt
-
-!assets/realesrgan/
-assets/realesrgan/*
-!assets/realesrgan/README.md
+assets/others/*
+assets/realesrgan/RealESRGAN_x2plus.pth
 
 frontend/*
 !frontend/static_v2/

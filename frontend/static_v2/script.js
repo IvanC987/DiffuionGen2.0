@@ -145,6 +145,76 @@ window.addEventListener('storage', function(event) {
     }
 });
 
+// Prompt Matching Controls
+document.getElementById('use_prompt_matching').addEventListener('change', function() {
+  const trainBtn = document.getElementById('prompt_match_train_btn');
+  const valBtn = document.getElementById('prompt_match_val_btn');
+  const trainInput = document.getElementById('prompt_match_train');
+  const valInput = document.getElementById('prompt_match_val');
+
+  if (this.checked) {
+    // Enable buttons
+    trainBtn.disabled = false;
+    valBtn.disabled = false;
+    trainBtn.classList.remove('prompt-match-disabled');
+    valBtn.classList.remove('prompt-match-disabled');
+    trainBtn.classList.add('prompt-match-enabled', 'prompt-match-active');
+    valBtn.classList.add('prompt-match-enabled');
+
+    // Set Training Set as checked by default
+    trainInput.value = 'true';
+    valInput.value = 'false';
+  } else {
+    // Disable buttons and reset
+    trainBtn.disabled = true;
+    valBtn.disabled = true;
+    trainBtn.classList.remove('prompt-match-enabled', 'prompt-match-active');
+    valBtn.classList.remove('prompt-match-enabled', 'prompt-match-active');
+    trainBtn.classList.add('prompt-match-disabled');
+    valBtn.classList.add('prompt-match-disabled');
+    trainInput.value = 'false';
+    valInput.value = 'false';
+  }
+});
+
+// Training Set button
+document.getElementById('prompt_match_train_btn').addEventListener('click', function(e) {
+  e.preventDefault();
+  if (document.getElementById('use_prompt_matching').checked) {
+    const trainInput = document.getElementById('prompt_match_train');
+    const valInput = document.getElementById('prompt_match_val');
+    const trainBtn = document.getElementById('prompt_match_train_btn');
+    const valBtn = document.getElementById('prompt_match_val_btn');
+
+    // Set Training Set as selected
+    trainInput.value = 'true';
+    valInput.value = 'false';
+
+    // Update button classes
+    trainBtn.classList.add('prompt-match-active');
+    valBtn.classList.remove('prompt-match-active');
+  }
+});
+
+// Validation Set button
+document.getElementById('prompt_match_val_btn').addEventListener('click', function(e) {
+  e.preventDefault();
+  if (document.getElementById('use_prompt_matching').checked) {
+    const trainInput = document.getElementById('prompt_match_train');
+    const valInput = document.getElementById('prompt_match_val');
+    const trainBtn = document.getElementById('prompt_match_train_btn');
+    const valBtn = document.getElementById('prompt_match_val_btn');
+
+    // Set Validation Set as selected
+    trainInput.value = 'false';
+    valInput.value = 'true';
+
+    // Update button classes
+    valBtn.classList.add('prompt-match-active');
+    trainBtn.classList.remove('prompt-match-active');
+  }
+});
+
 // Mutual exclusivity: img2img and in-painting
 // If user uploads to img2img, clear in-painting
 document.getElementById('init_image').addEventListener('change', function() {
@@ -158,6 +228,60 @@ document.getElementById('init_image').addEventListener('change', function() {
   }
   const strengthSlider = document.getElementById('img2img_strength');
   strengthSlider.disabled = this.files.length === 0;
+});
+
+// Random Prompt Generation Controls
+document.getElementById('generate_random_prompt_btn').addEventListener('click', async function(e) {
+  e.preventDefault();
+
+  const split = document.getElementById('random_prompt_split').value;
+  const category = document.getElementById('random_prompt_category').value;
+  const promptInput = document.getElementById('prompt');
+
+  try {
+    const response = await fetch(`/random_prompt?split=${split}&category=${encodeURIComponent(category)}`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Populate the prompt input with the returned prompt
+    if (data.prompt) {
+      promptInput.value = data.prompt;
+      console.log('Random prompt loaded:', data.prompt);
+    }
+  } catch (error) {
+    console.error('Error fetching random prompt:', error);
+    alert('Error generating random prompt: ' + error.message);
+  }
+});
+
+// Training Set button for random prompt
+document.getElementById('random_prompt_train_btn').addEventListener('click', function(e) {
+  e.preventDefault();
+  const splitInput = document.getElementById('random_prompt_split');
+  const trainBtn = document.getElementById('random_prompt_train_btn');
+  const valBtn = document.getElementById('random_prompt_val_btn');
+
+  splitInput.value = 'train';
+
+  trainBtn.classList.add('random-prompt-active');
+  valBtn.classList.remove('random-prompt-active');
+});
+
+// Validation Set button for random prompt
+document.getElementById('random_prompt_val_btn').addEventListener('click', function(e) {
+  e.preventDefault();
+  const splitInput = document.getElementById('random_prompt_split');
+  const trainBtn = document.getElementById('random_prompt_train_btn');
+  const valBtn = document.getElementById('random_prompt_val_btn');
+
+  splitInput.value = 'val';
+
+  valBtn.classList.add('random-prompt-active');
+  trainBtn.classList.remove('random-prompt-active');
 });
 
 // If user uploads to in-painting image, clear img2img
@@ -197,6 +321,7 @@ document.getElementById('generateForm').addEventListener('submit', async functio
   const progressText = document.getElementById('progressText');
   const previewStepLabel = document.getElementById('previewStepLabel');
   const resultImage = document.getElementById('resultImage');
+  const usedPromptContainer = document.getElementById('usedPromptContainer');
   const realTimeDenoisingEnabled = document.getElementById('real_time_denoising').checked;
 
   progressBar.style.display = 'block';
@@ -205,6 +330,7 @@ document.getElementById('generateForm').addEventListener('submit', async functio
   progressText.textContent = '0%';
   previewStepLabel.style.display = 'none';
   previewStepLabel.textContent = '';
+  usedPromptContainer.style.display = 'none';
 
   try {
     // Handle img2img image upload
@@ -270,7 +396,10 @@ document.getElementById('generateForm').addEventListener('submit', async functio
       b64_image: b64Image,
       img2img_strength: Number(document.getElementById('img2img_strength').value),
       b64_inpaint_image: b64InpaintImage,
-      b64_inpaint_mask: b64InpaintMask
+      b64_inpaint_mask: b64InpaintMask,
+      use_prompt_matching: document.getElementById('use_prompt_matching').checked,
+      prompt_match_train: document.getElementById('prompt_match_train').value === 'true',
+      prompt_match_val: document.getElementById('prompt_match_val').value === 'true'
     };
 
     // --- FIX: Start polling BEFORE the blocking await ---
@@ -302,6 +431,16 @@ document.getElementById('generateForm').addEventListener('submit', async functio
     const prevButton = document.getElementById('prevButton');
     const nextButton = document.getElementById('nextButton');
     const imageCounter = document.getElementById('imageCounter');
+    const usedPromptContainer = document.getElementById('usedPromptContainer');
+    const usedPromptText = document.getElementById('usedPromptText');
+
+    // Display the used prompt (if prompt matching was used)
+    if (result.prompt) {
+      usedPromptText.textContent = result.prompt;
+      usedPromptContainer.style.display = 'block';
+    } else {
+      usedPromptContainer.style.display = 'none';
+    }
 
     // Hide placeholder and show generated image
     placeholder.style.display = 'none';
