@@ -229,6 +229,8 @@ def prompt_match(prompt: str, db: faiss.IndexFlatIP, prompt_list: list[str]):
         text_embd = clip_text_model(**tokens).pooler_output
         text_embd = torch.nn.functional.normalize(text_embd, dim=-1)
 
+    text_embd = text_embd.detach().cpu().float().numpy()
+
     # E.g.
     # scores=[[0.7709671  0.76750416 0.7666029  0.76368684 0.76290154]]
     # indices=[[28 37 98 34  9]]

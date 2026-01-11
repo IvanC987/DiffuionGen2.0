@@ -78,7 +78,7 @@ async function pollProgress(progressBar, progressText) {
 let previewPolling = false;
 
 async function pollPreview(resultImage, previewStepLabel) {
-  if (!previewPolling) return;
+  if (!previewPolling || !resultImage || !previewStepLabel) return;
 
   try {
     const res = await fetch("/preview");
@@ -316,12 +316,18 @@ document.getElementById('generateForm').addEventListener('submit', async functio
   generateBtn.disabled = true;
   generateBtn.textContent = 'Generating...';
 
-  // Show progress bar
+  // Move ALL DOM lookups to the top - before any polling calls
   const progressBar = document.getElementById('progressBar');
   const progressText = document.getElementById('progressText');
   const previewStepLabel = document.getElementById('previewStepLabel');
   const resultImage = document.getElementById('resultImage');
   const usedPromptContainer = document.getElementById('usedPromptContainer');
+  const placeholder = document.getElementById('imagePlaceholder');
+  const downloadButton = document.getElementById('downloadButton');
+  const prevButton = document.getElementById('prevButton');
+  const nextButton = document.getElementById('nextButton');
+  const imageCounter = document.getElementById('imageCounter');
+  const usedPromptText = document.getElementById('usedPromptText');
   const realTimeDenoisingEnabled = document.getElementById('real_time_denoising').checked;
 
   progressBar.style.display = 'block';
@@ -330,6 +336,7 @@ document.getElementById('generateForm').addEventListener('submit', async functio
   progressText.textContent = '0%';
   previewStepLabel.style.display = 'none';
   previewStepLabel.textContent = '';
+  resultImage.src = '';
   usedPromptContainer.style.display = 'none';
 
   try {
@@ -425,15 +432,6 @@ document.getElementById('generateForm').addEventListener('submit', async functio
     }
 
     const result = await response.json();
-
-    const resultImage = document.getElementById('resultImage');
-    const placeholder = document.getElementById('imagePlaceholder');
-    const downloadButton = document.getElementById('downloadButton');
-    const prevButton = document.getElementById('prevButton');
-    const nextButton = document.getElementById('nextButton');
-    const imageCounter = document.getElementById('imageCounter');
-    const usedPromptContainer = document.getElementById('usedPromptContainer');
-    const usedPromptText = document.getElementById('usedPromptText');
 
     // Display the used prompt (if prompt matching was used)
     if (result.prompt) {

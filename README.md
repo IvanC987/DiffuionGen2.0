@@ -74,14 +74,16 @@ The gains come primarily from the removal of LPIPS loss (useful, but wasn't wort
 Generate images that contain two coherent interpretations when rotated 180°.
 
 ```
-Prompt A: "a serene koi fish swimming in a pond"
-Prompt B: "a coiled dragon emerging from clouds"
+Prompt A: "A powerful river cascades down a series of moss-covered rocky steps, creating a dynamic whitewater flow that carves through the heart of a lush, misty canyon."
+Prompt B: "Towering mountain shrouded in haze sunlight barely breaks through"
 ```
 
 **How it works:**
-At each denoising step, the model predicts noise for both the original latent and a rotated copy conditioned on a second prompt. The predictions are rotated back and blended, enforcing symmetry over time.
+At each denoising step, the model predicts noise for both the original latent and a rotated copy conditioned on a second prompt. The predictions are rotated back and blended, enforcing symmetry over time. (Still a beta feature, would require prompts that would 'logically' merge)
 
-[Examples Here]
+| Prompt A | Prompt B | Combined (Anagram) |
+|---------|----------|--------------------|
+| ![](./sample_images/AM_A.png) | ![](./sample_images/AM_B.png) | ![](./sample_images/AM_AB.png) |
 
 ---
 
@@ -100,7 +102,10 @@ Matched prompt:
 * Temperature-based sampling for diversity
 * Ensures prompts stay stylistically aligned with training distribution
 
-[Examples Here]
+| Without Prompt Matching | With Prompt Matching |
+|-------------------------|----------------------|
+| ![](./sample_images/PM_WO.png) | ![](./sample_images/PM_W.png) |
+
 
 ---
 
@@ -109,6 +114,14 @@ Matched prompt:
 Intermediate denoising states can be periodically decoded and streamed during inference, allowing users to observe how structure and details emerge step by step.
 
 This is intended as an inspection and research tool rather than a production feature.
+
+<div align="center">
+  <img src="./sample_images/mountain.gif" width="256"/>
+  <br/>
+  <em>
+    Prompt: "A lonely glacier clings to a mountain as the last light of twilight fades under heavy rain"
+  </em>
+</div>
 
 ---
 
@@ -130,27 +143,22 @@ The included web UI exposes all major features:
 * anagram mode
 * optional Real-ESRGAN upsampling
 
-[Examples Here]
+| Interface Overview | Advanced Controls |
+|--------------------|-------------------|
+| ![](./sample_images/UI_1.png) | ![](./sample_images/UI_2.png) |
+
 
 ---
 
 ## Gallery
 
-### Standard Generation
+A small selection of samples generated with different prompts.
 
-[Examples Here]
-
-### Anagram Mode
-
-[Examples Here]
-
-### In-Painting
-
-[Before / After]
-
-### Prompt Matching
-
-[Examples Here]
+|  |  |  |  |
+|--|--|--|--|
+| ![](./sample_images/Gallery1.png) | ![](./sample_images/Gallery2.png) | ![](./sample_images/Gallery3.png) | ![](./sample_images/Gallery4.png) |
+| ![](./sample_images/Gallery5.png) | ![](./sample_images/Gallery6.png) | ![](./sample_images/Gallery7.png) | ![](./sample_images/Gallery8.png) |
+| ![](./sample_images/Gallery9.png) | ![](./sample_images/Gallery10.png) | ![](./sample_images/Gallery11.png) | ![](./sample_images/Gallery12.png) |
 
 ---
 
@@ -209,10 +217,6 @@ Where v1 focused on establishing a baseline system, v2 emphasizes research flexi
 
 ## License
 
-MIT License
-
-BSD 3-Clause License
-
-<Expand here>
-<Should also add a GIF somewhere above?>
+MIT License (project code)
+BSD 3-Clause License (third-party components)
 
