@@ -210,7 +210,7 @@ def upscale_image(images: list[Image]) -> list[Image]:
 
 def get_init_latent(b64_image: str, batch_size: int):
     b64_pil = base64_to_pil(b64_image)
-    b64_pil = b64_pil.resize((inf_cfg["latent_dim"], inf_cfg["latent_dim"]), Image.Resampling.BICUBIC)
+    b64_pil = b64_pil.resize((inf_cfg["latent_dim"] * 8, inf_cfg["latent_dim"] * 8), Image.Resampling.BICUBIC)
 
     # Convert to torch tensor, shape (C, H, W) and range [0, 1]
     img_tensor = transforms.ToTensor()(b64_pil)
